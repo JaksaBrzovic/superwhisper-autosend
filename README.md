@@ -115,18 +115,30 @@ It prints JSON. Use it like this:
   (format `Control+Space`, `Control+Shift+KeyM`; empty means not set).
 - `autoPasteEffective: false` → SuperWhisper's Auto Paste is off; Autosend needs it on.
 
-### 3. Ask the user (one message)
+### 3. Ask the user (short wizard)
 
-Ask everything in one short message, so the user approves once:
+Ask these questions in order and wait for the answers before installing. If you have a
+multiple-choice question tool, use it with exactly the options listed. Some tools add their own
+free-text "Other" choice that you cannot remove; you do not need it, but if the user types into it,
+use what they typed as their answer.
 
-1. **Shortcut:** "SuperWhisper uses `<shortcut>` to dictate. Is that the shortcut you use?"
-   If neither shortcut is set, ask which shortcut they use for SuperWhisper.
-2. **Auto Paste** (only if `autoPasteEffective` is false): "Autosend needs SuperWhisper's Auto Paste
+1. **Shortcut.** Show the detected shortcuts in plain words, for example
+   "Ctrl+Space (hold to talk) and Ctrl+Shift+Space (press to start/stop)", and ask
+   "Are these your SuperWhisper dictation shortcuts?"
+   Options: **Yes** / **No**.
+   - **No**, or no shortcut was detected: ask in a normal chat message (not a multiple-choice question)
+     "Which shortcut do you use for dictation, and do you hold it while talking or press it to start
+     and stop? For example: Ctrl+Alt+Space, hold. Type *back* to go back."
+     If they type *back*, ask question 1 again. Otherwise convert the answer to the format
+     `Control+Alt+Space` (keys: Control, Shift, Alt, Win, Space, letters as `KeyA`, digits as
+     `Digit1`, F1-F24) and repeat it back once in plain words to confirm.
+2. **Auto Paste** (only if `autoPasteEffective` is false). "Autosend needs SuperWhisper's Auto Paste
    turned on. May I turn it on? SuperWhisper will restart for a moment."
-3. **Start with Windows:** "May I install it so it runs in the background and starts automatically
-   when you sign in to Windows? (It adds a shortcut to your Startup folder; you can remove it any time.)"
-
-Wait for the answers before installing.
+   Options: **Yes** / **No** / **Back** (Back returns to question 1).
+3. **Start with Windows.** "May I install it now so it runs in the background and starts
+   automatically when you sign in to Windows? You can remove it any time."
+   Options: **Yes, install** / **Install without auto-start** / **Back** (Back returns to the
+   previous question).
 
 ### 4. Install
 
