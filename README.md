@@ -106,7 +106,7 @@ You may read the scripts first; they are short.
 ### 1. Download (pinned version)
 
 ```powershell
-$version = '1.0.1'
+$version = '1.0.2'
 $dir = Join-Path $env:TEMP "superwhisper-autosend-setup"
 Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $dir | Out-Null
