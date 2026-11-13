@@ -23,6 +23,9 @@ once.
 
 The setup also checks whether SuperWhisper starts with Windows and offers to turn that on.
 
+> **Note:** if SuperWhisper is not running during setup, its start with Windows may not work until you
+> open SuperWhisper by hand once. Open it after installing to be safe.
+
 ## Use
 
 1. Click into the **empty** message box in Claude or ChatGPT/Codex.
@@ -166,6 +169,8 @@ own free-text **Other** choice; question 1 relies on it for entering different k
    start with Windows, so after a restart dictation only works once you open it yourself. Should
    SuperWhisper start automatically when you sign in?"
    Options: **Yes** / **No** / **Back** (Back returns to the previous question).
+   If the user says **Yes** and `superWhisperRunning` is false, add: "SuperWhisper is not running right
+   now. Please open it once after the setup, otherwise it may not start with Windows until you do."
 4. **Start with Windows.** "May I install Autosend now so it runs in the background and starts
    automatically when you sign in to Windows? You can remove it any time."
    Options: **Yes, install** / **Install without auto-start** / **Back** (Back returns to the
@@ -187,8 +192,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$src\install.ps1" -EnableAu
 - Add `-NoStartup` only if the user does not want it to start with Windows.
 
 The installer copies the files to `%LOCALAPPDATA%\SuperWhisperAutosend`, stops any older copy, starts it
-hidden, adds it to Windows sign-in (Startup folder) and prints a check. Success looks like
+hidden, adds it to Windows sign-in (a scheduled task for the current user that starts it 20 seconds
+after sign-in; the Startup folder if the task cannot be created) and prints a check. Success looks like
 `Running: True` plus `Shortcut: ...` lines. `message box not visible` is fine.
+
+Some agent apps are packaged Windows apps (for example the Claude desktop app). Windows gives the
+commands they run a private copy of new files under AppData and of user registry entries, invisible to
+the rest of Windows. The installer and uninstaller detect this and run themselves again as a normal
+process, so you do not need to do anything; this is also why `-Detect` and install can take a few
+seconds longer there.
 
 Then remove the download: `Remove-Item $dir -Recurse -Force`.
 
@@ -196,7 +208,8 @@ Then remove the download: `Remove-Item $dir -Recurse -Force`.
 
 In two or three sentences: it is running and starts with Windows; click into an empty message box in
 Claude or ChatGPT/Codex, dictate with their shortcut, and the message sends by itself; to uninstall,
-ask an agent or run the uninstall command above.
+ask an agent or run the uninstall command above. If the installer printed `SuperWhisper is not running`,
+remind the user to open SuperWhisper once now so it also starts with Windows.
 
 ### If your permission system blocks a step
 

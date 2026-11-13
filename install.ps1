@@ -49,12 +49,93 @@ $configPath = Join-Path $installDir 'config.json'
 $superWhisperDir = Join-Path $env:LOCALAPPDATA 'com.superwhisper.app'
 $preferencesPath = Join-Path $superWhisperDir 'preferences.json'
 $startupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'SuperWhisper Autosend.lnk'
+$taskName = 'SuperWhisper Autosend'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $startupApprovedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 $superWhisperRunName = 'superwhisper'
 $superWhisperDownloadUrl = 'https://superwhisper.com'
 $powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $launchArguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installedScript`""
+
+# ---------------------------------------------------------------- leave a packaged app's private storage
+
+# Packaged desktop apps (MSIX, for example the Claude desktop app) give their child processes a
+# private copy of new files under AppData and of HKCU writes. An install made from there is
+# invisible to the rest of Windows, so nothing would start at sign-in. In that case this script
+# runs itself again as a normal process (created through WMI, which does not inherit the package)
+# and relays the output. uninstall.ps1 does the same.
+function Test-InsideAppPackage
+{
+    # Child processes of such apps can have no package identity of their own and still be
+    # redirected, so this checks where a new folder actually lands.
+    $probeName = "superwhisper-autosend-probe-$([guid]::NewGuid().ToString('N'))"
+    $probe = Join-Path $env:LOCALAPPDATA $probeName
+    New-Item -ItemType Directory -Path $probe | Out-Null
+    try
+    {
+        $redirected = @(Get-Item -Path (Join-Path $env:LOCALAPPDATA "Packages\*\LocalCache\Local\$probeName") -Force -ErrorAction SilentlyContinue)
+        return $redirected.Count -gt 0
+    }
+    finally
+    {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-OutsideAppPackage([string[]]$files, [string]$arguments)
+{
+    # TEMP is not redirected, so a copy there is visible to the new process.
+    $stage = Join-Path ([IO.Path]::GetTempPath()) "superwhisper-autosend-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $stage | Out-Null
+    foreach ($file in $files)
+    {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $stage
+    }
+    $quote = { param($text) "'" + ($text -replace "'", "''") + "'" }
+    $outputPath = Join-Path $stage 'output.txt'
+    $exitPath = Join-Path $stage 'exitcode.txt'
+    $command = "`$code = 0; try { & $(& $quote (Join-Path $stage $files[0])) $arguments *>&1 | Out-File -LiteralPath $(& $quote $outputPath) -Encoding utf8 -Width 4096 } " +
+        "catch { `$_ | Out-File -LiteralPath $(& $quote $outputPath) -Encoding utf8 -Width 4096 -Append; `$code = 1 }; " +
+        "[IO.File]::WriteAllText($(& $quote $exitPath), [string]`$code)"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $commandLine = "`"$powershellPath`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $encoded"
+    $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
+    if ($result.ReturnValue -ne 0)
+    {
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+        throw "Could not start a normal PowerShell process (Win32_Process.Create returned $($result.ReturnValue)). Run this script from a normal PowerShell window instead."
+    }
+    $deadline = (Get-Date).AddMinutes(3)
+    while ((Get-Process -Id $result.ProcessId -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline)
+    {
+        Start-Sleep -Milliseconds 300
+    }
+    $output = @()
+    if (Test-Path -LiteralPath $outputPath) { $output = @(Get-Content -LiteralPath $outputPath -Encoding UTF8) }
+    $exitCode = 1
+    if (Test-Path -LiteralPath $exitPath) { $exitCode = [int](Get-Content -LiteralPath $exitPath -Raw) }
+    else { $output += 'The setup process did not finish in time.' }
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    return [pscustomobject]@{ Output = $output; ExitCode = $exitCode }
+}
+
+if (Test-InsideAppPackage)
+{
+    $forwarded = foreach ($entry in $PSBoundParameters.GetEnumerator())
+    {
+        if ($entry.Value -is [switch])
+        {
+            if ($entry.Value) { "-$($entry.Key)" }
+        }
+        else
+        {
+            "-$($entry.Key) '$("$($entry.Value)" -replace "'", "''")'"
+        }
+    }
+    $result = Invoke-OutsideAppPackage @('install.ps1', $scriptName, 'uninstall.ps1') ($forwarded -join ' ')
+    $result.Output
+    exit $result.ExitCode
+}
 
 function Read-JsonFile([string]$path)
 {
@@ -119,6 +200,53 @@ function Test-SuperWhisperStartsAtSignIn
     return $false
 }
 
+function Test-AutosendStartsAtSignIn
+{
+    if ($null -ne (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) { return $true }
+    return Test-Path -LiteralPath $startupLink
+}
+
+# Starts Autosend at sign-in through a scheduled task for the current user (no admin rights needed).
+# A task, unlike a Startup folder shortcut, can wait until sign-in has settled and retry: a
+# PowerShell started in the first seconds after sign-in was seen to exit before running the script.
+# Falls back to the Startup folder shortcut if the task cannot be created.
+function Register-AutosendStartup
+{
+    Remove-AutosendStartup
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    try
+    {
+        $action = New-ScheduledTaskAction -Execute $powershellPath -Argument $launchArguments -WorkingDirectory $installDir
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+        $trigger.Delay = 'PT20S'
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+            -MultipleInstances IgnoreNew
+        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings `
+            -Principal $principal -Description 'Starts SuperWhisper Autosend at sign-in.' -ErrorAction Stop | Out-Null
+        return
+    }
+    catch
+    {
+        Write-Warning "Could not create the sign-in task ($($_.Exception.Message)); using the Startup folder instead."
+    }
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($startupLink)
+    $link.TargetPath = $powershellPath
+    $link.Arguments = $launchArguments
+    $link.WorkingDirectory = $installDir
+    $link.WindowStyle = 7
+    $link.Description = 'SuperWhisper Autosend'
+    $link.Save()
+}
+
+function Remove-AutosendStartup
+{
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $startupLink -Force -ErrorAction SilentlyContinue
+}
+
 function Get-Report
 {
     $preferences = Read-JsonFile $preferencesPath
@@ -148,7 +276,7 @@ function Get-Report
         autoPasteEffective      = $effective -eq $true
         autosendInstalled       = Test-Path -LiteralPath $installedScript
         autosendRunning         = @(Get-AutosendProcesses).Count -gt 0
-        autosendStartsAtSignIn  = Test-Path -LiteralPath $startupLink
+        autosendStartsAtSignIn  = Test-AutosendStartsAtSignIn
         autosendOverrides       = $config
     }
 }
@@ -271,6 +399,12 @@ else
             Remove-ItemProperty -LiteralPath $startupApprovedKey -Name $superWhisperRunName -ErrorAction SilentlyContinue
             $newPreferencesText = $newPreferencesText -replace '"launchAtLogin"(\s*):(\s*)false', '"launchAtLogin"$1:$2true'
             $messages += 'SuperWhisper now starts at sign-in.'
+            if ($null -eq (Get-SuperWhisperProcess))
+            {
+                # Seen in practice: with SuperWhisper closed during setup, it did not start at the next
+                # sign-in until it had been opened by hand once.
+                $messages += 'SuperWhisper is not running. Open it once now; until then it may not start at sign-in.'
+            }
         }
     }
 
@@ -306,18 +440,11 @@ else
 
 if ($NoStartup)
 {
-    Remove-Item -LiteralPath $startupLink -Force -ErrorAction SilentlyContinue
+    Remove-AutosendStartup
 }
 else
 {
-    $shell = New-Object -ComObject WScript.Shell
-    $link = $shell.CreateShortcut($startupLink)
-    $link.TargetPath = $powershellPath
-    $link.Arguments = $launchArguments
-    $link.WorkingDirectory = $installDir
-    $link.WindowStyle = 7
-    $link.Description = 'SuperWhisper Autosend'
-    $link.Save()
+    Register-AutosendStartup
 }
 
 # ---------------------------------------------------------------- start now (detached, hidden)
@@ -328,7 +455,7 @@ Start-Sleep -Seconds 2
 Write-Output ''
 Write-Output "Installed to $installDir"
 Write-Output "Running: $(@(Get-AutosendProcesses).Count -gt 0)"
-Write-Output "Starts at sign-in: $(-not $NoStartup)"
+Write-Output "Starts at sign-in: $(Test-AutosendStartsAtSignIn)"
 Write-Output "SuperWhisper installed: $superWhisperReady"
 Write-Output "SuperWhisper starts at sign-in: $(Test-SuperWhisperStartsAtSignIn)"
 & $powershellPath -NoProfile -ExecutionPolicy Bypass -File $installedScript -Check
