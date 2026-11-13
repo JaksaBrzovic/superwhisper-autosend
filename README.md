@@ -7,6 +7,18 @@ on Windows. No more pressing Enter.
 Hold your SuperWhisper shortcut in an empty message box, speak, release. SuperWhisper pastes the text
 and Autosend presses Enter for you.
 
+## Supported apps
+
+The current version works with:
+
+- the **Claude desktop app**
+- the **ChatGPT desktop app** and the **Codex desktop app**
+- **Claude Code** running in **Windows Terminal**
+
+Other apps and terminals are not supported yet. If you want Autosend in another app, ask any AI agent
+that can edit code to add support for it (point it at this repository). You are welcome to open a pull
+request with the change; I will review it and merge it if it fits.
+
 ## Install in one step
 
 Paste this into an AI agent that can run commands on your PC (Claude Code, the Code tab of the
@@ -108,6 +120,12 @@ You are installing SuperWhisper Autosend for the user on **Windows** (if the use
 in the user's language, and do not ask more than needed. All commands are **Windows PowerShell**; if
 your shell is bash, run each through `powershell -NoProfile -Command "..."`. No admin rights are needed.
 You may read the scripts first; they are short.
+
+Autosend currently works only in the Claude desktop app, the ChatGPT and Codex desktop apps and Claude
+Code in Windows Terminal. If the user wants it for another app or terminal, tell them it is not
+supported yet, but that they (or you, if they ask) can extend it for that app and open a pull request
+on this repository, which the maintainer will review and merge if it fits. You can still install it for
+the supported apps.
 
 ### 1. Download (pinned version)
 
