@@ -117,12 +117,16 @@ It prints JSON. Use it like this:
 
 ### 3. Ask the user (one message)
 
-Ask both in one short message:
+Ask everything in one short message, so the user approves once:
 
 1. **Shortcut:** "SuperWhisper uses `<shortcut>` to dictate. Is that the shortcut you use?"
    If neither shortcut is set, ask which shortcut they use for SuperWhisper.
 2. **Auto Paste** (only if `autoPasteEffective` is false): "Autosend needs SuperWhisper's Auto Paste
    turned on. May I turn it on? SuperWhisper will restart for a moment."
+3. **Start with Windows:** "May I install it so it runs in the background and starts automatically
+   when you sign in to Windows? (It adds a shortcut to your Startup folder; you can remove it any time.)"
+
+Wait for the answers before installing.
 
 ### 4. Install
 
@@ -148,6 +152,21 @@ Then remove the download: `Remove-Item $dir -Recurse -Force`.
 In two or three sentences: it is running and starts with Windows; click into an empty message box in
 Claude or ChatGPT/Codex, dictate with their shortcut, and the message sends by itself; to uninstall,
 ask an agent or run the uninstall command above.
+
+### If your permission system blocks a step
+
+Some agents' safety systems block installing a program that starts with Windows, even after the user
+said yes. Do not try to work around a block. Instead give the user the exact command to run themselves,
+for example:
+
+> I'm not allowed to set up auto-start myself. Please press **Win + R**, type `powershell`, press Enter,
+> paste this line and press Enter:
+>
+> `powershell -NoProfile -ExecutionPolicy Bypass -File "<full path to install.ps1>" -EnableAutoPaste`
+
+Fill in the real path and the same options you would have used, keep the download folder until the user
+has run it, then check the result with `install.ps1 -Detect` (`autosendRunning` and
+`autosendStartsAtSignIn` should be `true`) and continue with step 5.
 
 ### Rules
 
