@@ -127,7 +127,7 @@ own free-text **Other** choice; question 1 relies on it for entering different k
    start/stop)". Options:
    - Two shortcuts detected: **Both (as in SuperWhisper)** / **Only &lt;hold shortcut&gt;** /
      **Only &lt;toggle shortcut&gt;**. "Only ..." installs with the other one disabled
-     (`-ToggleRecordingShortcut ""` or `-PushToTalkShortcut ""`).
+     (`-ToggleRecordingShortcut none` or `-PushToTalkShortcut none`).
    - One shortcut detected: **&lt;that shortcut&gt;** / **Not sure, keep it** (both keep the detected one).
    - **Other (typed by the user):** convert it to the format `Control+Alt+Space` (keys: Control, Shift,
      Alt, Win, Space, letters as `KeyA`, digits as `Digit1`, F1-F24). "Hold" or no mode given means

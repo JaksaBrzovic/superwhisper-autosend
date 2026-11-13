@@ -16,7 +16,8 @@
 
 .PARAMETER PushToTalkShortcut
     Optional override, e.g. "Control+Space". Leave out to follow SuperWhisper's own setting.
-    An empty string disables this shortcut.
+    "none" (or an empty string) disables this shortcut. Use "none" when calling via
+    powershell -File, which drops empty arguments.
 
 .PARAMETER ToggleRecordingShortcut
     Optional override, e.g. "Control+Shift+Space". Same rules as above.
@@ -147,6 +148,8 @@ if ($PSBoundParameters.ContainsKey('PushToTalkShortcut') -or $PSBoundParameters.
     {
         foreach ($property in $existing.PSObject.Properties) { $config[$property.Name] = $property.Value }
     }
+    if ($PushToTalkShortcut -eq 'none') { $PushToTalkShortcut = '' }
+    if ($ToggleRecordingShortcut -eq 'none') { $ToggleRecordingShortcut = '' }
     if ($PSBoundParameters.ContainsKey('PushToTalkShortcut')) { $config['pushToTalkShortcut'] = $PushToTalkShortcut }
     if ($PSBoundParameters.ContainsKey('ToggleRecordingShortcut')) { $config['toggleRecordingShortcut'] = $ToggleRecordingShortcut }
     Write-TextFile $configPath ($config | ConvertTo-Json)
