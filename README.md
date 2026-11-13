@@ -118,20 +118,23 @@ It prints JSON. Use it like this:
 ### 3. Ask the user (short wizard)
 
 Ask these questions in order and wait for the answers before installing. If you have a
-multiple-choice question tool, use it with exactly the options listed. Some tools add their own
-free-text "Other" choice that you cannot remove; you do not need it, but if the user types into it,
-use what they typed as their answer.
+multiple-choice question tool, use it with exactly the options listed. Such tools usually add their
+own free-text **Other** choice; question 1 relies on it for entering different keys.
 
-1. **Shortcut.** Show the detected shortcuts in plain words, for example
-   "Ctrl+Space (hold to talk) and Ctrl+Shift+Space (press to start/stop)", and ask
-   "Are these your SuperWhisper dictation shortcuts?"
-   Options: **Yes** / **No**.
-   - **No**, or no shortcut was detected: ask in a normal chat message (not a multiple-choice question)
-     "Which shortcut do you use for dictation, and do you hold it while talking or press it to start
-     and stop? For example: Ctrl+Alt+Space, hold. Type *back* to go back."
-     If they type *back*, ask question 1 again. Otherwise convert the answer to the format
-     `Control+Alt+Space` (keys: Control, Shift, Alt, Win, Space, letters as `KeyA`, digits as
-     `Digit1`, F1-F24) and repeat it back once in plain words to confirm.
+1. **Shortcut.** Ask: "Which SuperWhisper shortcut do you use to dictate? If it is a different one,
+   choose Other and type it, for example: Ctrl+Alt+Space, hold."
+   Write shortcuts in plain words, e.g. "Ctrl+Space (hold to talk)", "Ctrl+Shift+Space (press to
+   start/stop)". Options:
+   - Two shortcuts detected: **Both (as in SuperWhisper)** / **Only &lt;hold shortcut&gt;** /
+     **Only &lt;toggle shortcut&gt;**. "Only ..." installs with the other one disabled
+     (`-ToggleRecordingShortcut ""` or `-PushToTalkShortcut ""`).
+   - One shortcut detected: **&lt;that shortcut&gt;** / **Not sure, keep it** (both keep the detected one).
+   - **Other (typed by the user):** convert it to the format `Control+Alt+Space` (keys: Control, Shift,
+     Alt, Win, Space, letters as `KeyA`, digits as `Digit1`, F1-F24). "Hold" or no mode given means
+     `-PushToTalkShortcut`; "press to start/stop" means `-ToggleRecordingShortcut`. Repeat it back once
+     in plain words to confirm.
+   - No shortcut detected, or no multiple-choice tool: ask the same in a normal chat message
+     ("Reply *yes* to keep these, or type your shortcut").
 2. **Auto Paste** (only if `autoPasteEffective` is false). "Autosend needs SuperWhisper's Auto Paste
    turned on. May I turn it on? SuperWhisper will restart for a moment."
    Options: **Yes** / **No** / **Back** (Back returns to question 1).
