@@ -47,11 +47,20 @@ source is in this repository.
 
 ## Uninstall
 
-Ask your agent to "uninstall SuperWhisper Autosend", or run in PowerShell:
+Paste this into your agent:
+
+```text
+Uninstall https://github.com/JaksaBrzovic/superwhisper-autosend
+```
+
+Or run in PowerShell:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\SuperWhisperAutosend\uninstall.ps1"
 ```
+
+This stops Autosend and removes it from Windows sign-in, its files, its log and the settings backups
+the installer made. SuperWhisper and its settings (including Auto Paste) stay as they are.
 
 ## Manual install
 
@@ -88,7 +97,8 @@ Optional settings go in `%LOCALAPPDATA%\SuperWhisperAutosend\config.json`
 
 ## Instructions for AI agents
 
-You are installing SuperWhisper Autosend for the user on **Windows**. Keep it short and friendly, talk
+You are installing SuperWhisper Autosend for the user on **Windows** (if the user asked to
+**uninstall**, skip to [Uninstall](#uninstall-for-agents)). Keep it short and friendly, talk
 in the user's language, and do not ask more than needed. All commands are **Windows PowerShell**; if
 your shell is bash, run each through `powershell -NoProfile -Command "..."`. No admin rights are needed.
 You may read the scripts first; they are short.
@@ -202,6 +212,20 @@ for example:
 Fill in the real path and the same options you would have used, keep the download folder until the user
 has run it, then check the result with `install.ps1 -Detect` (`autosendRunning` and
 `autosendStartsAtSignIn` should be `true`) and continue with step 5.
+
+### Uninstall (for agents)
+
+No questions needed; the user already asked for it. Run the installed uninstaller:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\SuperWhisperAutosend\uninstall.ps1"
+```
+
+If that file does not exist, download the pinned version as in step 1 and run
+`"$src\uninstall.ps1"` instead (it works from any folder), then remove the download.
+It prints `SuperWhisper Autosend removed.` Tell the user in one sentence that Autosend is removed and
+SuperWhisper itself is unchanged. If your permission system blocks it, give the user the command to run
+themselves, as described above.
 
 ### Rules
 
