@@ -29,6 +29,7 @@ $superWhisperDir = Join-Path $env:LOCALAPPDATA 'com.superwhisper.app'
 $preferencesPath = Join-Path $superWhisperDir 'preferences.json'
 $logPath = Join-Path $env:TEMP 'superwhisper-autosend.log'
 $defaultApps = @('claude', 'ChatGPT', 'Codex')
+$defaultTerminals = @('WindowsTerminal')
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
 Add-Type @"
@@ -310,6 +311,7 @@ function Update-Settings([switch]$Force)
     $script:shortcuts = $shortcuts
     $script:cancelShortcut = New-SafeShortcut (Get-Setting $config $preferences 'cancelRecordingShortcut' 'Escape') 'cancel'
     $script:apps = @(Get-Setting $config $null 'apps' $defaultApps)
+    $script:terminals = @(Get-Setting $config $null 'terminals' $defaultTerminals)
     $script:timeoutSeconds = [double](Get-Setting $config $null 'timeoutSeconds' 30)
     $script:stableMilliseconds = [double](Get-Setting $config $null 'stableMilliseconds' 600)
     $script:settingsStamp = $stamp
@@ -329,13 +331,62 @@ function Get-ProcessName([int]$id)
     return $processNames[$id]
 }
 
-# The message boxes of Claude and ChatGPT/Codex are ProseMirror editors.
+# The message boxes of Claude and ChatGPT/Codex are ProseMirror editors. Claude Code in a
+# terminal has no editor control: its prompt is the "> " box between two horizontal rules at the
+# bottom of the visible terminal text, which Windows Terminal exposes through UI Automation.
 function Test-Composer($element)
 {
     $info = $element.Current
+    $process = Get-ProcessName $info.ProcessId
+    if ($info.ClassName -eq 'TermControl' -and $script:terminals -contains $process)
+    {
+        return $null -ne (Get-TerminalPrompt $element)
+    }
     if ($info.ControlType -ne [Windows.Automation.ControlType]::Edit) { return $false }
     if ($info.ClassName -notmatch '(?:^|\s)ProseMirror(?:\s|$)') { return $false }
-    return $script:apps -contains (Get-ProcessName $info.ProcessId)
+    return $script:apps -contains $process
+}
+
+$terminalCache = @{ Element = $null; Time = [datetime]::MinValue; Prompt = $null }
+
+# Returns the text of the Claude Code prompt box at the bottom of the visible terminal text, or
+# $null when no prompt box is shown (for example while a permission question is open).
+# Reading the terminal is slower than reading an editor, so a result is reused for 100 ms.
+function Get-TerminalPrompt($element)
+{
+    $now = [datetime]::UtcNow
+    if ($null -ne $terminalCache.Element -and ($now - $terminalCache.Time).TotalMilliseconds -lt 100 -and
+        $terminalCache.Element.Equals($element))
+    {
+        return $terminalCache.Prompt
+    }
+
+    $prompt = $null
+    $pattern = $null
+    if ($element.TryGetCurrentPattern([Windows.Automation.TextPattern]::Pattern, [ref]$pattern))
+    {
+        $text = ($pattern.GetVisibleRanges() | ForEach-Object { $_.GetText(-1) }) -join "`n"
+        $lines = @($text -split "\r?\n" | ForEach-Object { $_.TrimEnd() })
+        $rules = @(for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^─{20,}$') { $i } })
+        if ($rules.Count -ge 2)
+        {
+            $top = $rules[-2]
+            $bottom = $rules[-1]
+            if ($bottom - $top -ge 2 -and $lines[$top + 1] -match '^\s?[>❯](?:\s|$)')
+            {
+                $body = @($lines[($top + 1)..($bottom - 1)])
+                $body[0] = $body[0] -replace '^\s?[>❯]', ''
+                $prompt = (($body | ForEach-Object { $_.Trim() }) -join "`n").Trim()
+                # The hint Claude Code shows in an empty prompt counts as empty.
+                if ($prompt -match '^Try "[^"]*"$') { $prompt = '' }
+            }
+        }
+    }
+
+    $terminalCache.Element = $element
+    $terminalCache.Time = $now
+    $terminalCache.Prompt = $prompt
+    return $prompt
 }
 
 function Get-Composer
@@ -354,6 +405,12 @@ function Get-Composer
 # Returns the message text; a placeholder reported as text counts as empty.
 function Get-ComposerText($element)
 {
+    if ($element.Current.ClassName -eq 'TermControl')
+    {
+        $prompt = Get-TerminalPrompt $element
+        if ($null -eq $prompt) { throw 'Message text is temporarily unavailable.' }
+        return $prompt
+    }
     $pattern = $null
     if ($element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$pattern))
     {
@@ -420,6 +477,33 @@ if ($Check)
         else
         {
             Write-Output "${app}: message box found, empty: $((Get-ComposerText $field) -eq '')"
+        }
+    }
+
+    $condition = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::ClassNameProperty, 'TermControl')
+    foreach ($terminal in $script:terminals)
+    {
+        $windows = @(Get-Process $terminal -ErrorAction SilentlyContinue |
+            Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero })
+        if ($windows.Count -eq 0)
+        {
+            Write-Output "${terminal}: not running."
+            continue
+        }
+        $prompts = @(foreach ($window in $windows)
+        {
+            $root = [Windows.Automation.AutomationElement]::FromHandle($window.MainWindowHandle)
+            $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition) |
+                ForEach-Object { Get-TerminalPrompt $_ } | Where-Object { $null -ne $_ }
+        })
+        if ($prompts.Count -eq 0)
+        {
+            Write-Output "${terminal}: running, no Claude Code prompt visible."
+        }
+        else
+        {
+            Write-Output "${terminal}: Claude Code prompt found, empty: $($prompts[0] -eq '')"
         }
     }
     return

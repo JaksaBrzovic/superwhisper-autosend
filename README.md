@@ -1,7 +1,8 @@
 # SuperWhisper Autosend
 
 Dictate with [SuperWhisper](https://superwhisper.com) and your message is **sent automatically** in the
-**Claude desktop app** and the **ChatGPT / Codex desktop app** on Windows. No more pressing Enter.
+**Claude desktop app**, the **ChatGPT / Codex desktop app** and **Claude Code in Windows Terminal**
+on Windows. No more pressing Enter.
 
 Hold your SuperWhisper shortcut in an empty message box, speak, release. SuperWhisper pastes the text
 and Autosend presses Enter for you.
@@ -28,7 +29,8 @@ The setup also checks whether SuperWhisper starts with Windows and offers to tur
 
 ## Use
 
-1. Click into the **empty** message box in Claude or ChatGPT/Codex.
+1. Click into the **empty** message box in Claude or ChatGPT/Codex, or into a Windows Terminal tab
+   where Claude Code is waiting with an empty prompt.
 2. Dictate with your SuperWhisper shortcut as usual (hold-to-talk or toggle).
 3. The message is sent as soon as the text is pasted.
 
@@ -41,8 +43,8 @@ nothing is sent automatically, so you can still dictate into a draft.
 - Reads your shortcuts from SuperWhisper's settings and follows changes automatically.
 - Uses a keyboard hook **only** to know whether your shortcut keys are held. It does not record,
   log or store keys or message text, and it makes **no network connections**.
-- Presses Enter only in the Claude and ChatGPT/Codex desktop apps, only after you used the shortcut
-  in an empty message box, and only within 30 seconds after recording stops.
+- Presses Enter only in the Claude and ChatGPT/Codex desktop apps and in Claude Code in Windows
+  Terminal, only after you used the shortcut in an empty message box, and only within 30 seconds after recording stops.
 - Writes a small status log (no keys, no text) to `%TEMP%\superwhisper-autosend.log`.
 
 Antivirus software may warn about the keyboard hook. That is expected for this kind of tool; the full
@@ -91,6 +93,7 @@ Optional settings go in `%LOCALAPPDATA%\SuperWhisperAutosend\config.json`
   "pushToTalkShortcut": "Control+Space",
   "toggleRecordingShortcut": "Control+Shift+Space",
   "apps": ["claude", "ChatGPT", "Codex"],
+  "terminals": ["WindowsTerminal"],
   "timeoutSeconds": 30,
   "stableMilliseconds": 600
 }
