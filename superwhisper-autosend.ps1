@@ -58,12 +58,51 @@ public static class AutosendKeys
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
 
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out Msg message, IntPtr window, uint min, uint max);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Msg
+    {
+        public IntPtr Window;
+        public uint Message;
+        public IntPtr WParam;
+        public IntPtr LParam;
+        public uint Time;
+        public int X;
+        public int Y;
+    }
+
+    // The hook runs on its own thread with its own message loop. Windows silently removes a
+    // low-level hook whose thread does not answer in time, and the main loop can block for a
+    // while in UI Automation calls, so the hook must not share that thread.
     public static void Install()
     {
-        hook = SetWindowsHookEx(13, callback, GetModuleHandle(null), 0);
+        int error = 0;
+        var ready = new System.Threading.ManualResetEvent(false);
+        var thread = new System.Threading.Thread(() =>
+        {
+            hook = SetWindowsHookEx(13, callback, GetModuleHandle(null), 0);
+            if (hook == IntPtr.Zero)
+            {
+                error = Marshal.GetLastWin32Error();
+            }
+            ready.Set();
+            if (hook == IntPtr.Zero)
+            {
+                return;
+            }
+            Msg message;
+            while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0)
+            {
+            }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+        ready.WaitOne();
         if (hook == IntPtr.Zero)
         {
-            throw new System.ComponentModel.Win32Exception();
+            throw new System.ComponentModel.Win32Exception(error);
         }
     }
 
