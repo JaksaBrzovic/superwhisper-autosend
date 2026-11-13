@@ -222,6 +222,9 @@ function Register-AutosendStartup
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
             -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
             -MultipleInstances IgnoreNew
+        # Scheduled tasks default to below-normal priority (7), which can let Windows drop the
+        # keyboard hook while the system is busy after sign-in; 4 is normal priority.
+        $settings.Priority = 4
         $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings `
             -Principal $principal -Description 'Starts SuperWhisper Autosend at sign-in.' -ErrorAction Stop | Out-Null

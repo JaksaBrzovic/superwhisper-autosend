@@ -42,9 +42,19 @@ public static class AutosendKeys
     private static readonly KeyboardHook callback = OnKey;
     private static readonly bool[] down = new bool[256];
     private static IntPtr hook;
+    private static uint hookThreadId;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(int type, KeyboardHook callback, IntPtr module, uint thread);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostThreadMessage(uint thread, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll")]
     private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
@@ -75,20 +85,30 @@ public static class AutosendKeys
 
     // The hook runs on its own thread with its own message loop. Windows silently removes a
     // low-level hook whose thread does not answer in time, and the main loop can block for a
-    // while in UI Automation calls, so the hook must not share that thread.
+    // while in UI Automation calls, so the hook must not share that thread. The thread also runs
+    // at the highest priority so it still answers in time while the system is busy after sign-in.
+    //
+    // Low-level hooks run newest first, and a hook that swallows a key hides it from older hooks.
+    // SuperWhisper swallows its own shortcut, so this hook must be newer than SuperWhisper's:
+    // calling Install again installs a fresh hook first and then removes the previous one.
     public static void Install()
     {
         int error = 0;
+        IntPtr newHook = IntPtr.Zero;
+        uint newThreadId = 0;
+        uint oldThreadId = hookThreadId;
         var ready = new System.Threading.ManualResetEvent(false);
         var thread = new System.Threading.Thread(() =>
         {
-            hook = SetWindowsHookEx(13, callback, GetModuleHandle(null), 0);
-            if (hook == IntPtr.Zero)
+            IntPtr installed = SetWindowsHookEx(13, callback, GetModuleHandle(null), 0);
+            if (installed == IntPtr.Zero)
             {
                 error = Marshal.GetLastWin32Error();
             }
+            newHook = installed;
+            newThreadId = GetCurrentThreadId();
             ready.Set();
-            if (hook == IntPtr.Zero)
+            if (installed == IntPtr.Zero)
             {
                 return;
             }
@@ -96,13 +116,21 @@ public static class AutosendKeys
             while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0)
             {
             }
+            UnhookWindowsHookEx(installed);
         });
         thread.IsBackground = true;
+        thread.Priority = System.Threading.ThreadPriority.Highest;
         thread.Start();
         ready.WaitOne();
-        if (hook == IntPtr.Zero)
+        if (newHook == IntPtr.Zero)
         {
             throw new System.ComponentModel.Win32Exception(error);
+        }
+        hook = newHook;
+        hookThreadId = newThreadId;
+        if (oldThreadId != 0)
+        {
+            PostThreadMessage(oldThreadId, 0x12, IntPtr.Zero, IntPtr.Zero);
         }
     }
 
@@ -411,7 +439,14 @@ if ((Test-Path -LiteralPath $logPath) -and (Get-Item -LiteralPath $logPath).Leng
     Remove-Item -LiteralPath $logPath -Force
 }
 
+# Scheduled tasks start below normal priority by default; the keyboard hook needs normal priority.
+$process = [Diagnostics.Process]::GetCurrentProcess()
+if ($process.PriorityClass -eq 'BelowNormal' -or $process.PriorityClass -eq 'Idle')
+{
+    $process.PriorityClass = 'Normal'
+}
 [AutosendKeys]::Install()
+$hookInstalledAt = [DateTime]::Now
 Trace 'Started'
 Update-Settings -Force
 Write-Host 'SuperWhisper Autosend is running. Close this window to stop.'
@@ -435,6 +470,27 @@ while ($true)
         {
             $nextSettingsCheck = $now.AddSeconds(2)
             try { Update-Settings } catch { Trace "Settings not read: $($_.Exception.Message)" }
+
+            # SuperWhisper started (or restarted) after our hook: its hook now sees the shortcut
+            # first and swallows it, so install ours again to be in front. SuperWhisper may set
+            # its hook a little after its process starts, so renew 3 s and again 20 s after that.
+            $superWhisperStart = Get-Process superwhisper -ErrorAction SilentlyContinue |
+                ForEach-Object { try { $_.StartTime } catch { } } | Sort-Object -Descending | Select-Object -First 1
+            $renewAt = $null
+            if ($null -ne $superWhisperStart)
+            {
+                $renewAt = $superWhisperStart.AddSeconds(3)
+                if ([DateTime]::Now -ge $superWhisperStart.AddSeconds(20))
+                {
+                    $renewAt = $superWhisperStart.AddSeconds(20)
+                }
+            }
+            if ($null -ne $renewAt -and $hookInstalledAt -lt $renewAt -and [DateTime]::Now -ge $renewAt)
+            {
+                [AutosendKeys]::Install()
+                $hookInstalledAt = [DateTime]::Now
+                Trace 'Keyboard hook renewed after SuperWhisper started'
+            }
         }
 
         $pressed = $null
