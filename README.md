@@ -17,7 +17,11 @@ Install https://github.com/JaksaBrzovic/superwhisper-autosend
 
 The agent reads the instructions below, asks you one or two short questions, and sets everything up.
 
-**You need:** Windows 10/11 and SuperWhisper installed and opened at least once.
+**You need:** Windows 10/11 and [SuperWhisper](https://superwhisper.com). You can also set up Autosend
+first and install SuperWhisper afterwards; Autosend picks it up as soon as SuperWhisper has been opened
+once.
+
+The setup also checks whether SuperWhisper starts with Windows and offers to turn that on.
 
 ## Use
 
@@ -109,11 +113,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$src\install.ps1" -Detect
 
 It prints JSON. Use it like this:
 
-- `superWhisperInstalled: false` → tell the user to install SuperWhisper from https://superwhisper.com,
-  open it once, and come back. Stop here.
+- `superWhisperInstalled: false` → tell the user: "SuperWhisper is not installed. Autosend only works
+  together with it, and you have to install it yourself: https://superwhisper.com. We can still set up
+  Autosend now; once you install SuperWhisper and open it, Autosend picks it up automatically, no need
+  to run this again." Then ask: **Continue now** / **Stop, I'll install SuperWhisper first**. On
+  Continue, skip questions 1, 2 and 3 below (there are no shortcuts or settings to read yet) and go to
+  question 4. Leave out `-EnableAutoPaste` and `-EnableSuperWhisperStartup`; in the final message
+  remind the user to turn on **Auto Paste** and **Launch at login** in SuperWhisper's settings after
+  installing it.
+- `superWhisperInstalled: true` but `superWhisperOpenedOnce: false` → ask the user to open SuperWhisper
+  once (and finish its setup), then run Detect again.
 - `pushToTalkShortcut` / `toggleRecordingShortcut` are the user's SuperWhisper shortcuts
   (format `Control+Space`, `Control+Shift+KeyM`; empty means not set).
 - `autoPasteEffective: false` → SuperWhisper's Auto Paste is off; Autosend needs it on.
+- `superWhisperStartsAtSignIn: false` → SuperWhisper does not start with Windows, so dictation (and
+  Autosend) won't work after a restart until the user opens SuperWhisper by hand.
 
 ### 3. Ask the user (short wizard)
 
@@ -138,7 +152,11 @@ own free-text **Other** choice; question 1 relies on it for entering different k
 2. **Auto Paste** (only if `autoPasteEffective` is false). "Autosend needs SuperWhisper's Auto Paste
    turned on. May I turn it on? SuperWhisper will restart for a moment."
    Options: **Yes** / **No** / **Back** (Back returns to question 1).
-3. **Start with Windows.** "May I install it now so it runs in the background and starts
+3. **SuperWhisper at sign-in** (only if `superWhisperStartsAtSignIn` is false). "SuperWhisper does not
+   start with Windows, so after a restart dictation only works once you open it yourself. Should
+   SuperWhisper start automatically when you sign in?"
+   Options: **Yes** / **No** / **Back** (Back returns to the previous question).
+4. **Start with Windows.** "May I install Autosend now so it runs in the background and starts
    automatically when you sign in to Windows? You can remove it any time."
    Options: **Yes, install** / **Install without auto-start** / **Back** (Back returns to the
    previous question).
@@ -151,6 +169,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$src\install.ps1" -EnableAu
 
 - Leave out `-EnableAutoPaste` if the user said no (then tell them to turn on Auto Paste in SuperWhisper
   settings themselves, otherwise nothing will be sent).
+- Add `-EnableSuperWhisperStartup` if the user said yes to question 3 (it turns on SuperWhisper's own
+  "Launch at login"; SuperWhisper restarts for a moment).
 - Only if the user uses a **different** shortcut than SuperWhisper reports, add
   `-PushToTalkShortcut "Control+Alt+Space"` (hold to talk) or `-ToggleRecordingShortcut "..."` (press to
   start, press to stop), using the same format.

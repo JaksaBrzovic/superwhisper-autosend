@@ -7,12 +7,17 @@
     (unless -NoStartup) starts it automatically at Windows sign-in.
 
 .PARAMETER Detect
-    Changes nothing. Prints a JSON report: SuperWhisper shortcuts, Auto Paste state,
-    and whether Autosend is installed/running. Use it before installing.
+    Changes nothing. Prints a JSON report: whether SuperWhisper is installed and starts at
+    sign-in, its shortcuts and Auto Paste state, and whether Autosend is installed/running.
+    Use it before installing.
 
 .PARAMETER EnableAutoPaste
     Turns on SuperWhisper's Auto Paste (required). SuperWhisper is restarted if running.
     A backup of each changed settings file is saved next to it (*.before-autosend.bak).
+
+.PARAMETER EnableSuperWhisperStartup
+    Makes SuperWhisper itself start at Windows sign-in (its own "Launch at login" setting).
+    SuperWhisper is restarted if running.
 
 .PARAMETER PushToTalkShortcut
     Optional override, e.g. "Control+Space". Leave out to follow SuperWhisper's own setting.
@@ -29,6 +34,7 @@
 param(
     [switch]$Detect,
     [switch]$EnableAutoPaste,
+    [switch]$EnableSuperWhisperStartup,
     [string]$PushToTalkShortcut,
     [string]$ToggleRecordingShortcut,
     [switch]$NoStartup
@@ -43,6 +49,10 @@ $configPath = Join-Path $installDir 'config.json'
 $superWhisperDir = Join-Path $env:LOCALAPPDATA 'com.superwhisper.app'
 $preferencesPath = Join-Path $superWhisperDir 'preferences.json'
 $startupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'SuperWhisper Autosend.lnk'
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$startupApprovedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+$superWhisperRunName = 'superwhisper'
+$superWhisperDownloadUrl = 'https://superwhisper.com'
 $powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $launchArguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installedScript`""
 
@@ -75,9 +85,44 @@ function Get-SuperWhisperProcess
     Get-Process Superwhisper -ErrorAction SilentlyContinue
 }
 
+# Path of Superwhisper.exe (from its uninstall entry, the default folder or the running process), or $null.
+function Get-SuperWhisperExe
+{
+    $keys = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
+    foreach ($entry in Get-ItemProperty $keys -ErrorAction SilentlyContinue)
+    {
+        if ($entry.DisplayName -ne 'superwhisper' -or -not $entry.DisplayIcon) { continue }
+        $path = ($entry.DisplayIcon -split ',')[0].Trim().Trim('"')
+        if (Test-Path -LiteralPath $path) { return $path }
+    }
+    $fallback = Join-Path $env:LOCALAPPDATA 'superwhisper\Superwhisper.exe'
+    if (Test-Path -LiteralPath $fallback) { return $fallback }
+    $running = @(Get-SuperWhisperProcess)
+    if ($running.Count -gt 0 -and $running[0].Path) { return $running[0].Path }
+    return $null
+}
+
+# True if a sign-in entry starts Superwhisper.exe and is not disabled in Task Manager.
+function Test-SuperWhisperStartsAtSignIn
+{
+    $run = Get-ItemProperty -LiteralPath $runKey -ErrorAction SilentlyContinue
+    if ($null -eq $run) { return $false }
+    foreach ($property in $run.PSObject.Properties)
+    {
+        if ("$($property.Value)" -notmatch '(?i)superwhisper\.exe') { continue }
+        $approved = (Get-ItemProperty -LiteralPath $startupApprovedKey -Name $property.Name -ErrorAction SilentlyContinue).($property.Name)
+        if ($null -eq $approved -or ($approved[0] -band 1) -eq 0) { return $true }
+    }
+    return $false
+}
+
 function Get-Report
 {
     $preferences = Read-JsonFile $preferencesPath
+    $superWhisperExe = Get-SuperWhisperExe
     $modePath = Get-ModePath $preferences
     $mode = Read-JsonFile $modePath
     $config = Read-JsonFile $configPath
@@ -89,8 +134,11 @@ function Get-Report
     if ($null -ne $modeAutoPaste) { $effective = $modeAutoPaste }
 
     [ordered]@{
-        superWhisperInstalled   = $null -ne $preferences
+        superWhisperInstalled   = $null -ne $superWhisperExe -or $null -ne $preferences
+        superWhisperOpenedOnce  = $null -ne $preferences
+        superWhisperDownloadUrl = $superWhisperDownloadUrl
         superWhisperRunning     = $null -ne (Get-SuperWhisperProcess)
+        superWhisperStartsAtSignIn = Test-SuperWhisperStartsAtSignIn
         pushToTalkShortcut      = $(if ($null -ne $preferences) { $preferences.pushToTalkShortcut })
         toggleRecordingShortcut = $(if ($null -ne $preferences) { $preferences.toggleRecordingShortcut })
         cancelRecordingShortcut = $(if ($null -ne $preferences) { $preferences.cancelRecordingShortcut })
@@ -113,9 +161,12 @@ if ($Detect)
 
 # ---------------------------------------------------------------- checks
 
-if (-not (Test-Path -LiteralPath $preferencesPath))
+# Autosend re-reads SuperWhisper's settings every few seconds, so it can be installed first:
+# it starts working once SuperWhisper is installed and opened.
+$superWhisperReady = Test-Path -LiteralPath $preferencesPath
+if (-not $superWhisperReady)
 {
-    throw "SuperWhisper settings not found at $preferencesPath. Install SuperWhisper (https://superwhisper.com), open it once, then run this again."
+    Write-Warning "SuperWhisper is not installed yet (or was never opened). Install it from $superWhisperDownloadUrl and open it once; Autosend picks it up automatically."
 }
 $sourceScript = Join-Path $PSScriptRoot $scriptName
 if (-not (Test-Path -LiteralPath $sourceScript))
@@ -155,33 +206,81 @@ if ($PSBoundParameters.ContainsKey('PushToTalkShortcut') -or $PSBoundParameters.
     Write-TextFile $configPath ($config | ConvertTo-Json)
 }
 
-# ---------------------------------------------------------------- Auto Paste
+# ---------------------------------------------------------------- SuperWhisper settings (Auto Paste, start at sign-in)
 
-if ($EnableAutoPaste)
+if (-not $superWhisperReady)
+{
+    if ($EnableAutoPaste)
+    {
+        Write-Warning 'Auto Paste not changed: turn it on in SuperWhisper settings after installing SuperWhisper.'
+    }
+    if ($EnableSuperWhisperStartup)
+    {
+        Write-Warning 'SuperWhisper start at sign-in not changed: turn on "Launch at login" in SuperWhisper settings after installing it.'
+    }
+}
+else
 {
     $preferences = Read-JsonFile $preferencesPath
-    $edits = @()
     $preferencesText = [IO.File]::ReadAllText($preferencesPath)
-    if ($preferencesText -match '"autoPasteEnabled"\s*:\s*false')
+    $newPreferencesText = $preferencesText
+    $modeEdit = $null
+    $messages = @()
+
+    if ($EnableAutoPaste)
     {
-        $edits += , @($preferencesPath, ($preferencesText -replace '"autoPasteEnabled"(\s*):(\s*)false', '"autoPasteEnabled"$1:$2true'))
-    }
-    elseif ($preferencesText -notmatch '"autoPasteEnabled"\s*:\s*true')
-    {
-        Write-Warning 'Auto Paste setting not found in SuperWhisper settings. Turn it on in SuperWhisper > Settings.'
-    }
-    $modePath = Get-ModePath $preferences
-    if (Test-Path -LiteralPath $modePath)
-    {
-        $modeText = [IO.File]::ReadAllText($modePath)
-        if ($modeText -match '"autoPaste"\s*:\s*false')
+        $autoPasteChanged = $false
+        if ($preferencesText -match '"autoPasteEnabled"\s*:\s*false')
         {
-            $edits += , @($modePath, ($modeText -replace '"autoPaste"(\s*):(\s*)false', '"autoPaste"$1:$2true'))
+            $newPreferencesText = $newPreferencesText -replace '"autoPasteEnabled"(\s*):(\s*)false', '"autoPasteEnabled"$1:$2true'
+            $autoPasteChanged = $true
+        }
+        elseif ($preferencesText -notmatch '"autoPasteEnabled"\s*:\s*true')
+        {
+            Write-Warning 'Auto Paste setting not found in SuperWhisper settings. Turn it on in SuperWhisper > Settings.'
+        }
+        $modePath = Get-ModePath $preferences
+        if (Test-Path -LiteralPath $modePath)
+        {
+            $modeText = [IO.File]::ReadAllText($modePath)
+            if ($modeText -match '"autoPaste"\s*:\s*false')
+            {
+                $modeEdit = @($modePath, ($modeText -replace '"autoPaste"(\s*):(\s*)false', '"autoPaste"$1:$2true'))
+                $autoPasteChanged = $true
+            }
+        }
+        $messages += $(if ($autoPasteChanged) { 'SuperWhisper Auto Paste turned on.' } else { 'SuperWhisper Auto Paste was already on.' })
+    }
+
+    if ($EnableSuperWhisperStartup)
+    {
+        $superWhisperExe = Get-SuperWhisperExe
+        if (Test-SuperWhisperStartsAtSignIn)
+        {
+            $messages += 'SuperWhisper already starts at sign-in.'
+        }
+        elseif ($null -eq $superWhisperExe)
+        {
+            Write-Warning 'Superwhisper.exe not found. Turn on "Launch at login" in SuperWhisper settings.'
+        }
+        else
+        {
+            # Same Run entry SuperWhisper writes for its own "Launch at login" setting; the setting is
+            # updated too so SuperWhisper does not remove the entry again on its next start.
+            Set-ItemProperty -LiteralPath $runKey -Name $superWhisperRunName -Value "`"$superWhisperExe`""
+            Remove-ItemProperty -LiteralPath $startupApprovedKey -Name $superWhisperRunName -ErrorAction SilentlyContinue
+            $newPreferencesText = $newPreferencesText -replace '"launchAtLogin"(\s*):(\s*)false', '"launchAtLogin"$1:$2true'
+            $messages += 'SuperWhisper now starts at sign-in.'
         }
     }
 
+    $edits = @()
+    if ($newPreferencesText -cne $preferencesText) { $edits += , @($preferencesPath, $newPreferencesText) }
+    if ($null -ne $modeEdit) { $edits += , $modeEdit }
+
     if ($edits.Count -gt 0)
     {
+        # SuperWhisper rewrites its settings on exit, so it is stopped while they are edited.
         $superWhisper = @(Get-SuperWhisperProcess)
         $superWhisperPath = $null
         if ($superWhisper.Count -gt 0)
@@ -199,12 +298,8 @@ if ($EnableAutoPaste)
         {
             Start-Process -FilePath $superWhisperPath
         }
-        Write-Output 'SuperWhisper Auto Paste turned on.'
     }
-    else
-    {
-        Write-Output 'SuperWhisper Auto Paste was already on.'
-    }
+    foreach ($message in $messages) { Write-Output $message }
 }
 
 # ---------------------------------------------------------------- start at sign-in
@@ -234,4 +329,6 @@ Write-Output ''
 Write-Output "Installed to $installDir"
 Write-Output "Running: $(@(Get-AutosendProcesses).Count -gt 0)"
 Write-Output "Starts at sign-in: $(-not $NoStartup)"
+Write-Output "SuperWhisper installed: $superWhisperReady"
+Write-Output "SuperWhisper starts at sign-in: $(Test-SuperWhisperStartsAtSignIn)"
 & $powershellPath -NoProfile -ExecutionPolicy Bypass -File $installedScript -Check
